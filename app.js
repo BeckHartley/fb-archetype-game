@@ -7,7 +7,7 @@
 */
 (function () {
   'use strict';
-
+ 
   const CFG = window.APP_CONFIG;
   const LS = {
     seenNonStd:   'ter_seen_nonstd_v1',   // codes the user has seen (for sample-without-replacement across plays)
@@ -16,7 +16,7 @@
     adminPhotos:  'ter_admin_photos_v1',  // { code: [dataUri, ...] }
     lastPlayer:   'ter_last_player_v1'
   };
-
+ 
   /* ==========================================================
      Utilities
      ========================================================== */
@@ -97,7 +97,7 @@
     if (n == null || isNaN(n)) return '—';
     return Number(n).toLocaleString('en-GB');
   }
-
+ 
   /* ==========================================================
      Data loading — prefer admin-edited version in localStorage
      ========================================================== */
@@ -108,21 +108,22 @@
     if (!res.ok) throw new Error('Could not load types.json (' + res.status + ')');
     return res.json();
   }
-
-  function getPhotosFor(code) {
+ 
+  function getPhotosFor(code, typeObj) {
+    // Prefer localStorage (admin session edits), fall back to photos baked into types.json
     const store = loadJSON(LS.adminPhotos, {});
-    return store[code] || [];
+    return store[code] || (typeObj && typeObj.photos) || [];
   }
-
+ 
   /* ==========================================================
      Non-standard MCQ card
      ========================================================== */
   function buildMcqCard(pick, allNonStd) {
     const tpl = $('#tpl-card-mcq').content.cloneNode(true);
     const root = tpl.firstElementChild;
-
+ 
     // Photo (if admin uploaded any)
-    const photos = getPhotosFor(pick.code);
+    const photos = getPhotosFor(pick.code, pick);
     const photoHolder = $('.photo', root);
     if (photos.length > 0) {
       const idx = Math.floor(Math.random() * photos.length);
@@ -134,7 +135,7 @@
     } else {
       $('.cls', root).textContent = pick.class_full || pick.class;
     }
-
+ 
     // Options: correct + 3 distractors from same class where possible
     const sameClass = allNonStd.filter(t => t.code !== pick.code && t.class === pick.class);
     const otherClass = allNonStd.filter(t => t.code !== pick.code && t.class !== pick.class);
@@ -150,7 +151,7 @@
     const factEl = $('.fact', revealEl);
     const metaEl = $('.meta', revealEl);
     const actions = $('.actions', root);
-
+ 
     let answered = false;
     options.forEach((opt, i) => {
       const btn = el('button', { class: 'option', type: 'button' }, [
@@ -178,36 +179,36 @@
         parts.push(el('span', {}, pick.class_full || pick.class));
         metaEl.innerHTML = '';
         parts.forEach(p => metaEl.appendChild(p));
-
+ 
         factEl.textContent = correct
           ? `Correct — that's ${pick.name}.`
           : `Not quite. The answer was ${pick.name}.`;
         $('#reveal-title', revealEl) && ($('#reveal-title', revealEl).textContent = correct ? 'Correct' : 'Revealed');
         revealEl.classList.add('show');
         actions.style.display = 'flex';
-
+ 
         // Store result on the card for the engine to read
         root._result = { correct: correct, chosen: opt.code };
       });
       optionsMount.appendChild(btn);
     });
-
+ 
     return { node: root, getResult: () => root._result || { correct: false, skipped: true } };
   }
-
+ 
   /* ==========================================================
      Traditional (portfolio data) card
      ========================================================== */
   function buildTradCard(pick) {
     const tpl = $('#tpl-card-trad').content.cloneNode(true);
     const root = tpl.firstElementChild;
-
+ 
     $('.prompt', root).textContent = pick.name;
     $('.fact', root).textContent = pick.description || pick.prompt || 'Does your organisation own properties of this traditional archetype?';
     $('.placeholder-label', root).textContent = pick.name;
-
+ 
     // Admin-uploaded photos?
-    const photos = getPhotosFor(pick.code);
+    const photos = getPhotosFor(pick.code, pick);
     if (photos.length > 0) {
       const photoHolder = $('.photo', root);
       const tag = photoHolder.querySelector('.tag');
@@ -215,16 +216,16 @@
       photoHolder.appendChild(el('img', { src: photos[Math.floor(Math.random() * photos.length)], alt: pick.name }));
       photoHolder.appendChild(tag || el('span', { class: 'tag trad' }, 'Traditional'));
     }
-
+ 
     const state = { has: null, count: null, bespoke: '', locations: '' };
-
+ 
     const hasRow = $('.has', root);
     const countRow = $('.how-many', root);
     const bespokeRow = $('.bespoke', root);
     const locationsRow = $('.locations', root);
     const bespokeInput = $('.bespoke-input', root);
     const locationsInput = $('.locations-input', root);
-
+ 
     hasRow.addEventListener('click', e => {
       const chip = e.target.closest('.chip');
       if (!chip) return;
@@ -247,7 +248,7 @@
         locationsInput.value = '';
       }
     });
-
+ 
     countRow.addEventListener('click', e => {
       const chip = e.target.closest('.chip');
       if (!chip) return;
@@ -255,10 +256,10 @@
       chip.classList.add('active');
       state.count = chip.dataset.value;
     });
-
+ 
     bespokeInput.addEventListener('input', () => { state.bespoke = bespokeInput.value.trim(); });
     locationsInput.addEventListener('input', () => { state.locations = locationsInput.value.trim(); });
-
+ 
     return {
       node: root,
       getResult: () => ({
@@ -274,7 +275,7 @@
       })
     };
   }
-
+ 
   /* ==========================================================
      Game engine
      ========================================================== */
@@ -288,7 +289,7 @@
     portfolioAnswers: [],
     startedAt: null
   };
-
+ 
   async function start() {
     try {
       game.types = await loadTypes();
@@ -297,7 +298,7 @@
       console.error(e);
       return;
     }
-
+ 
     // Wire up intro
     $('#intro-form').addEventListener('submit', onIntroSubmit);
     // Prefill if returning
@@ -310,12 +311,12 @@
       $('#f-email').value = last.email || '';
       $('#f-phone').value = last.phone || '';
     }
-
+ 
     // End-screen buttons
     $('#btn-replay').addEventListener('click', () => { buildDeck(); show('screen-game'); renderCurrent(); });
     $('#btn-share').addEventListener('click', shareResult);
   }
-
+ 
   function onIntroSubmit(e) {
     e.preventDefault();
     const f = e.target;
@@ -333,12 +334,12 @@
     errEl.style.display = 'none';
     game.player = player;
     saveJSON(LS.lastPlayer, player);
-
+ 
     buildDeck();
     show('screen-game');
     renderCurrent();
   }
-
+ 
   function validatePlayer(p) {
     if (!p.name) return 'Please enter your name.';
     if (!p.org) return 'Please enter your organisation.';
@@ -347,77 +348,77 @@
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) return 'That email doesn\'t look right.';
     return null;
   }
-
+ 
   function buildDeck() {
     const total = CFG.CARDS_PER_GAME || 20;
     const tradTarget = CFG.TRADITIONAL_PER_GAME || 4;
     const nsTarget = total - tradTarget;
-
+ 
     const tradPool = (game.types.traditional || []).filter(Boolean);
     const nsPool = (game.types.nonStandard || []).filter(Boolean);
-
+ 
     // If the user hasn't uploaded traditional types yet, fall back to built-in defaults so the game still runs.
     const tradAvail = tradPool.length > 0 ? tradPool : DEFAULT_TRAD_TYPES;
-
+ 
     const tradPicks = sampleWithoutReplacement(tradAvail, Math.min(tradTarget, tradAvail.length), LS.seenTrad);
     const nsPicks = sampleWithoutReplacement(nsPool, nsTarget, LS.seenNonStd);
-
+ 
     // If traditional pool too small, pad with more non-standards
     let nsFinalCount = nsPicks.length + Math.max(0, tradTarget - tradPicks.length);
     if (nsFinalCount > nsPicks.length) {
       const extra = sampleWithoutReplacement(nsPool.filter(p => !nsPicks.includes(p)), nsFinalCount - nsPicks.length, LS.seenNonStd);
       nsPicks.push(...extra);
     }
-
+ 
     const ordered = interleave(
       nsPicks.map(p => ({ kind: 'mcq', pick: p })),
       tradPicks.map(p => ({ kind: 'trad', pick: p })),
       total
     );
-
+ 
     game.cards = ordered;
     game.currentIdx = 0;
     game.score = 0;
     game.answers = [];
     game.portfolioAnswers = [];
     game.startedAt = Date.now();
-
+ 
     $('#counter-total').textContent = total;
     $('#score-now').textContent = '0';
     $('#progress-bar').style.width = '0%';
   }
-
+ 
   function renderCurrent() {
     const i = game.currentIdx;
     const total = game.cards.length;
     $('#counter-current').textContent = (i + 1);
     $('#progress-bar').style.width = ((i) / total * 100).toFixed(1) + '%';
-
+ 
     const mount = $('#card-mount');
     mount.innerHTML = '';
-
+ 
     const card = game.cards[i];
     const builder = card.kind === 'mcq'
       ? buildMcqCard(card.pick, game.types.nonStandard)
       : buildTradCard(card.pick);
-
+ 
     card._builder = builder;
-
+ 
     const nextBtn = builder.node.querySelector('.next');
     if (nextBtn) {
       nextBtn.addEventListener('click', () => advance());
     }
     mount.appendChild(builder.node);
-
+ 
     // For trad cards, show the Next button immediately; for MCQ we hide it until they've answered.
     const actions = builder.node.querySelector('.actions');
     if (card.kind === 'trad') actions.style.display = 'flex';
   }
-
+ 
   function advance() {
     const card = game.cards[game.currentIdx];
     const result = card._builder.getResult();
-
+ 
     if (card.kind === 'mcq') {
       if (result.correct) game.score += 1;
       game.answers.push({ code: card.pick.code, name: card.pick.name, correct: !!result.correct, chosen: result.chosen });
@@ -425,7 +426,7 @@
     } else {
       game.portfolioAnswers.push(result.portfolio);
     }
-
+ 
     game.currentIdx += 1;
     if (game.currentIdx >= game.cards.length) {
       finish();
@@ -434,7 +435,7 @@
       $('#progress-bar').style.width = (game.currentIdx / game.cards.length * 100).toFixed(1) + '%';
     }
   }
-
+ 
   /* ==========================================================
      End screen + leaderboard
      ========================================================== */
@@ -453,10 +454,10 @@
     $('#end-verdict').textContent = verdict;
     $('#end-title').textContent = pct >= 0.8 ? 'Excellent work.' : pct >= 0.5 ? 'Good work.' : 'Thanks for playing.';
     show('screen-end');
-
+ 
     submitResults().finally(() => loadLeaderboard());
   }
-
+ 
   async function submitResults() {
     const payload = {
       action: 'submit',
@@ -488,7 +489,7 @@
       toast('Couldn\'t reach the server — your score still shows locally.');
     }
   }
-
+ 
   async function loadLeaderboard() {
     const mount = $('#leaderboard-mount');
     if (!CFG.APPS_SCRIPT_URL) {
@@ -505,7 +506,7 @@
       mount.innerHTML = '<div class="empty">Leaderboard unavailable. Try again later.</div>';
     }
   }
-
+ 
   function renderLeaderboard(rows) {
     const mount = $('#leaderboard-mount');
     if (!rows || !rows.length) {
@@ -536,7 +537,7 @@
     mount.innerHTML = '';
     mount.appendChild(table);
   }
-
+ 
   function shareResult() {
     const nsTotal = game.cards.filter(c => c.kind === 'mcq').length;
     const line = `I scored ${game.score}/${nsTotal} on Transform-ER's "Guess the Archetype" — how well do you know UK non-traditional housing?`;
@@ -545,7 +546,7 @@
       () => toast('Copy failed')
     );
   }
-
+ 
   /* ==========================================================
      Fallback traditional types (used only if admin hasn't added any)
      Named broadly so admin can replace / augment.
@@ -580,7 +581,7 @@
       description: 'Brick/block 2–4 storey flat blocks, typically 1960s–1980s. Common communal heating, flat roofs, varied cladding.'
     }
   ];
-
+ 
   /* ==========================================================
      Boot
      ========================================================== */
